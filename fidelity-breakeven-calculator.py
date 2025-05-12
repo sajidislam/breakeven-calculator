@@ -1,14 +1,35 @@
-# Complete, optimized and debugged version of the breakeven calculator and benchmark comparison script
-
+import yfinance as yf
 from datetime import datetime
 import pandas as pd
-import yfinance as yf
 import os
 
-# Constants
 SAVINGS_RATE = 0.05
 DATE_FORMAT = "%b-%d-%Y"
 TODAY = datetime.today()
+
+def get_spy_performance(trades):
+    spy_data = yf.download('SPY',
+                           start=min(t['Purchase Date'] for t in trades).date(),
+                           end=datetime.today().date() + pd.Timedelta(days=1),
+                           progress=False,
+                           auto_adjust=True)
+
+    spy_returns = {}
+
+    for trade in trades:
+        purchase_date = trade['Purchase Date'].date()
+
+        try:
+            purchase_price = spy_data.loc[spy_data.index >= pd.to_datetime(purchase_date), 'Close'].iloc[0].item()
+            current_price = spy_data['Close'].iloc[-1].item()
+            percent_change = ((current_price - purchase_price) / purchase_price) * 100
+            spy_returns[trade['Purchase Date'].strftime("%Y-%m-%d")] = round(percent_change, 2)
+        except Exception as e:
+            spy_returns[trade['Purchase Date'].strftime("%Y-%m-%d")] = None
+            print(f"Warning: Could not calculate SPY return for {purchase_date}: {e}")
+
+    return spy_returns
+
 
 def get_output_filename(prefix="breakeven_output"):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -27,9 +48,12 @@ def parse_line(line):
     return purchase_date, quantity, cost_basis_total
 
 def compare_against_benchmark(trades):
+    #symbols_input = input("Enter one or more benchmark symbols (comma-separated), or press Enter to use SPY: ")
+    #symbols = [s.strip().upper() for s in symbols_input.split(',') if s.strip()] or ['SPY']
     symbols_input = input("Enter one or more benchmark symbols (comma-separated). SPY will always be included: ")
     user_symbols = [s.strip().upper() for s in symbols_input.split(',') if s.strip()]
     symbols = ['SPY'] + [s for s in user_symbols if s != 'SPY']
+
 
     today = datetime.today().date()
     results = []
@@ -38,15 +62,20 @@ def compare_against_benchmark(trades):
         for trade in trades:
             purchase_date = trade['Purchase Date'].date()
             investment_amount = trade['Original Cost Basis']
+
             try:
                 data = yf.download(symbol, start=purchase_date, end=today + pd.Timedelta(days=1), progress=False, auto_adjust=True)
                 if data.empty:
+                    print(f"No data found for {symbol} on or after {purchase_date}")
                     continue
+
                 purchase_price = data.loc[data.index >= pd.to_datetime(purchase_date), 'Close'].iloc[0].item()
                 current_price = data['Close'].iloc[-1].item()
+
                 shares = investment_amount / purchase_price
                 current_value = shares * current_price
                 percent_change = ((current_value - investment_amount) / investment_amount) * 100
+
                 results.append({
                     'Symbol': symbol,
                     'Purchase Date': purchase_date.strftime("%Y-%m-%d"),
@@ -54,108 +83,14 @@ def compare_against_benchmark(trades):
                     'Current Value': round(current_value, 2),
                     'Percent Change': round(percent_change, 2)
                 })
-            except Exception:
+            except Exception as e:
+                print(f"Error fetching data for {symbol} on {purchase_date}: {e}")
                 continue
 
     benchmark_df = pd.DataFrame(results)
-    return benchmark_df, symbols
-
-def get_spy_performance(trades):
-    spy_data = yf.download('SPY', start=min(t['Purchase Date'] for t in trades).date(),
-                           end=datetime.today().date() + pd.Timedelta(days=1),
-                           progress=False, auto_adjust=True)
-    spy_returns = {}
-    for trade in trades:
-        purchase_date = trade['Purchase Date'].date()
-        try:
-            purchase_price = spy_data.loc[spy_data.index >= pd.to_datetime(purchase_date), 'Close'].iloc[0].item()
-            current_price = spy_data['Close'].iloc[-1].item()
-            percent_change = ((current_price - purchase_price) / purchase_price) * 100
-            spy_returns[trade['Purchase Date'].strftime("%Y-%m-%d")] = round(percent_change, 2)
-        except Exception:
-            spy_returns[trade['Purchase Date'].strftime("%Y-%m-%d")] = None
-    return spy_returns
-
-def fetch_sp500_list():
-    url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
-    try:
-        tables = pd.read_html(url)
-        sp500_table = tables[0]
-        sp500_table.to_csv("sp500_list.csv", index=False)
-        print("✅ S&P 500 list saved to 'sp500_list.csv'")
-    except Exception as e:
-        print(f"Error fetching S&P 500 list: {e}")
-
-def compare_sp500_performance(trades):
-    try:
-        sp500_df = pd.read_csv("sp500_list.csv")
-    except FileNotFoundError:
-        print("Error: 'sp500_list.csv' not found. Please run fetch_sp500_list() first.")
-        return
-
-    symbols = sp500_df['Symbol'].tolist()
-    today = datetime.today().date()
-    results = []
-    failures = []
-
-    total_tasks = len(symbols)
-    completed = 0
-
-    for symbol in symbols:
-        yf_symbol = symbol.replace('.', '-')
-        try:
-            data = yf.download(yf_symbol, start=min(t['Purchase Date'] for t in trades).date(),
-                               end=today + pd.Timedelta(days=1), progress=False, auto_adjust=True)
-            if data.empty:
-                raise ValueError("Empty data returned")
-
-            for trade in trades:
-                purchase_date = trade['Purchase Date'].date()
-                investment_amount = trade['Original Cost Basis']
-                try:
-                    purchase_price = data.loc[data.index >= pd.to_datetime(purchase_date), 'Close'].iloc[0].item()
-                    current_price = data['Close'].iloc[-1].item()
-                    shares = investment_amount / purchase_price
-                    current_value = shares * current_price
-                    percent_change = ((current_value - investment_amount) / investment_amount) * 100
-
-                    results.append({
-                        'Symbol': symbol,
-                        'Purchase Date': purchase_date.strftime("%Y-%m-%d"),
-                        'Investment Amount': investment_amount,
-                        'Current Value': round(current_value, 2),
-                        'Percent Change': round(percent_change, 2)
-                    })
-                except Exception as inner_e:
-                    failures.append({
-                        'Symbol': symbol,
-                        'Date': purchase_date,
-                        'Error': str(inner_e)
-                    })
-
-        except Exception as outer_e:
-            failures.append({
-                'Symbol': symbol,
-                'Date': '',
-                'Error': str(outer_e)
-            })
-
-        completed += 1
-        if completed % 10 == 0 or completed == total_tasks:
-            print(f"Progress: {completed} of {total_tasks} stocks processed...")
-
-    if results:
-        df = pd.DataFrame(results)
-        df.sort_values(by='Percent Change', ascending=False, inplace=True)
-        filename = f"sp500_comparison_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-        df.to_csv(filename, index=False)
-        print(f"\n✅ S&P 500 performance comparison saved to '{filename}'")
-
-    if failures:
-        fail_df = pd.DataFrame(failures)
-        fail_filename = f"sp500_failed_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-        fail_df.to_csv(fail_filename, index=False)
-        print(f"⚠️  Failed downloads logged to '{fail_filename}'")
+    print("\nBenchmark Comparison:\n")
+    print(benchmark_df.to_string(index=False))
+    return benchmark_df
 
 def main():
     results = []
@@ -195,40 +130,48 @@ def main():
         'Breakeven Price': avg_sale_price_required
     })
 
+    df = pd.DataFrame(results)
+    print("\nTrade Summary:\n")
+    print(df.to_string(index=False))
+
     spy_performance = get_spy_performance(benchmark_trades)
+
     for r in results:
         if r['Purchase Date'] != '---':
             spy_return = spy_performance.get(r['Purchase Date'], None)
-            r['Vs SPY (%)'] = round(-spy_return, 2) if spy_return is not None else 'N/A'
+            if spy_return is not None:
+                r['Vs SPY (%)'] = round(-spy_return, 2)  # Your return is 0% at breakeven
+            else:
+                r['Vs SPY (%)'] = 'N/A'
         else:
             r['Vs SPY (%)'] = '---'
 
+    # Run benchmark comparison
+    #compare_against_benchmark(benchmark_trades)
+    benchmark_df = compare_against_benchmark(benchmark_trades)
+
+    # Combine both trade data and benchmark data
     trade_df = pd.DataFrame(results)
     print("\nTrade Summary:\n")
     print(trade_df.to_string(index=False))
 
-    benchmark_df, benchmark_symbols = compare_against_benchmark(benchmark_trades)
-
     if not benchmark_df.empty:
-        print("\nBenchmark Comparison (vs: " + ", ".join(benchmark_symbols) + "):\n")
+        print("\nBenchmark Comparison:\n")
         print(benchmark_df.to_string(index=False))
 
-        symbols_header = pd.DataFrame([{
-            'Symbol': f"Benchmarks used: {', '.join(benchmark_symbols)}"
-        }])
+        # Add an empty row and then the benchmark section to CSV
         empty_row = pd.Series(dtype=object)
-        final_output = pd.concat([trade_df, pd.DataFrame([empty_row]), symbols_header, benchmark_df], ignore_index=True)
+        final_output = pd.concat([trade_df, pd.DataFrame([empty_row]), benchmark_df], ignore_index=True)
     else:
         final_output = trade_df
 
+    # Save to CSV
     output_file = get_output_filename()
     final_output.to_csv(output_file, index=False)
     print(f"\n✅ Results saved to {output_file}")
 
-    run_sp500 = input("\nWould you like to compare your investments against all S&P 500 stocks? (y/n): ").strip().lower()
-    if run_sp500 == 'y':
-        fetch_sp500_list()
-        compare_sp500_performance(benchmark_trades)
-
+#------------------------
+#------------------------
 if __name__ == "__main__":
     main()
+
