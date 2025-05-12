@@ -1,14 +1,134 @@
 # Complete, optimized and debugged version of the breakeven calculator and benchmark comparison script
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 import pandas as pd
 import yfinance as yf
 import os
+import time
+import random
 
 # Constants
 SAVINGS_RATE = 0.05
 DATE_FORMAT = "%b-%d-%Y"
 TODAY = datetime.today()
+
+
+def process_symbol_lot(symbol, trade, today):
+    results = []
+    failures = []
+    yf_symbol = symbol.replace('.', '-')
+    purchase_date = trade['Purchase Date'].date()
+    investment_amount = trade['Original Cost Basis']
+
+    try:
+        data = yf.download(yf_symbol, start=purchase_date, end=today + pd.Timedelta(days=1),
+                           progress=False, auto_adjust=True)
+        if data.empty:
+            raise ValueError("No data returned for symbol on or after purchase date.")
+
+        price = data.loc[data.index >= pd.to_datetime(purchase_date), 'Close']
+        if price.empty:
+            raise ValueError("No price available on or after trade date.")
+
+        purchase_price = price.iloc[0].item()
+        current_price = data['Close'].iloc[-1].item()
+        shares = investment_amount / purchase_price
+        current_value = shares * current_price
+        percent_change = ((current_value - investment_amount) / investment_amount) * 100
+
+        results.append({
+            'Symbol': symbol,
+            'Purchase Date': purchase_date.strftime("%Y-%m-%d"),
+            'Investment Amount': investment_amount,
+            'Current Value': round(current_value, 2),
+            'Percent Change': round(percent_change, 2)
+        })
+
+    except Exception as e:
+        failures.append({
+            'Symbol': symbol,
+            'Date': purchase_date,
+            'Error': str(e)
+        })
+
+    return results, failures
+
+
+def retry_failed_symbols_once(failures, trades, today):
+    retry_results = []
+    retry_failures = []
+
+    symbols_to_retry = list(set(f['Symbol'] for f in failures if f['Symbol']))
+    print(f"\n🔁 Retrying {len(symbols_to_retry)} failed tickers...")
+
+    def retry(symbol):
+        return process_sp500_symbol(symbol, trades, today)
+
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        futures = {executor.submit(retry, symbol): symbol for symbol in symbols_to_retry}
+
+        for count, future in enumerate(as_completed(futures), 1):
+            symbol = futures[future]
+            try:
+                results, failures = future.result()
+                retry_results.extend(results)
+                retry_failures.extend(failures)
+            except Exception as e:
+                retry_failures.append({'Symbol': symbol, 'Date': '', 'Error': str(e)})
+
+            if count % 5 == 0 or count == len(symbols_to_retry):
+                print(f"Retry Progress: {count}/{len(symbols_to_retry)} completed")
+
+    return retry_results, retry_failures
+
+def process_sp500_symbol(symbol, trades, today):
+    results = []
+    failures = []
+
+    yf_symbol = symbol.replace('.', '-')
+    try:
+        data = yf.download(yf_symbol, start=min(t['Purchase Date'] for t in trades).date(),
+                           end=today + pd.Timedelta(days=1), progress=False, auto_adjust=True)
+        if data.empty:
+            raise ValueError("Empty data returned")
+
+        for trade in trades:
+            purchase_date = trade['Purchase Date'].date()
+            investment_amount = trade['Original Cost Basis']
+
+            try:
+                purchase_price = data.loc[data.index >= pd.to_datetime(purchase_date), 'Close'].iloc[0].item()
+                current_price = data['Close'].iloc[-1].item()
+                shares = investment_amount / purchase_price
+                current_value = shares * current_price
+                percent_change = ((current_value - investment_amount) / investment_amount) * 100
+
+                results.append({
+                    'Symbol': symbol,
+                    'Purchase Date': purchase_date.strftime("%Y-%m-%d"),
+                    'Investment Amount': investment_amount,
+                    'Current Value': round(current_value, 2),
+                    'Percent Change': round(percent_change, 2)
+                })
+            except Exception as e:
+                failures.append({
+                    'Symbol': symbol,
+                    'Date': purchase_date,
+                    'Error': str(e)
+                })
+
+    except Exception as e:
+        failures.append({
+            'Symbol': symbol,
+            'Date': '',
+            'Error': str(e)
+        })
+#    time.sleep(random.uniform(0.1, 0.3))  # Sleep 100–300 ms
+    time.sleep(random.uniform(1.0, 20.0))  # Sleep between 1000ms and 9000ms
+    time.sleep(9.0)  # Exactly 5 seconds
+    return results, failures
+
 
 def get_output_filename(prefix="breakeven_output"):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -87,75 +207,84 @@ def fetch_sp500_list():
         print(f"Error fetching S&P 500 list: {e}")
 
 def compare_sp500_performance(trades):
+    import time
+    import pandas as pd
+    from datetime import datetime
+    import yfinance as yf
+
     try:
         sp500_df = pd.read_csv("sp500_list.csv")
     except FileNotFoundError:
         print("Error: 'sp500_list.csv' not found. Please run fetch_sp500_list() first.")
         return
 
-    symbols = sp500_df['Symbol'].tolist()
+    symbols = sp500_df['Symbol'].dropna().unique().tolist()
     today = datetime.today().date()
-    results = []
-    failures = []
+    all_results = []
+    all_failures = []
 
-    total_tasks = len(symbols)
-    completed = 0
+    print(f"🔄 Running single-threaded, high-accuracy S&P 500 comparison...")
+
+    count = 0
+    total = len(symbols) * len(trades)
 
     for symbol in symbols:
         yf_symbol = symbol.replace('.', '-')
-        try:
-            data = yf.download(yf_symbol, start=min(t['Purchase Date'] for t in trades).date(),
-                               end=today + pd.Timedelta(days=1), progress=False, auto_adjust=True)
-            if data.empty:
-                raise ValueError("Empty data returned")
+        for trade in trades:
+            purchase_date = trade['Purchase Date'].date()
+            investment_amount = trade['Original Cost Basis']
 
-            for trade in trades:
-                purchase_date = trade['Purchase Date'].date()
-                investment_amount = trade['Original Cost Basis']
-                try:
-                    purchase_price = data.loc[data.index >= pd.to_datetime(purchase_date), 'Close'].iloc[0].item()
-                    current_price = data['Close'].iloc[-1].item()
-                    shares = investment_amount / purchase_price
-                    current_value = shares * current_price
-                    percent_change = ((current_value - investment_amount) / investment_amount) * 100
+            try:
+                data = yf.download(yf_symbol, start=purchase_date, end=today + pd.Timedelta(days=1),
+                                   progress=False, auto_adjust=True)
+                if data.empty:
+                    raise ValueError("No data returned for symbol on or after purchase date.")
 
-                    results.append({
-                        'Symbol': symbol,
-                        'Purchase Date': purchase_date.strftime("%Y-%m-%d"),
-                        'Investment Amount': investment_amount,
-                        'Current Value': round(current_value, 2),
-                        'Percent Change': round(percent_change, 2)
-                    })
-                except Exception as inner_e:
-                    failures.append({
-                        'Symbol': symbol,
-                        'Date': purchase_date,
-                        'Error': str(inner_e)
-                    })
+                price = data.loc[data.index >= pd.to_datetime(purchase_date), 'Close']
+                if price.empty:
+                    raise ValueError("No price available on or after trade date.")
 
-        except Exception as outer_e:
-            failures.append({
-                'Symbol': symbol,
-                'Date': '',
-                'Error': str(outer_e)
-            })
+                purchase_price = price.iloc[0].item()
+                current_price = data['Close'].iloc[-1].item()
+                shares = investment_amount / purchase_price
+                current_value = shares * current_price
+                percent_change = ((current_value - investment_amount) / investment_amount) * 100
 
-        completed += 1
-        if completed % 10 == 0 or completed == total_tasks:
-            print(f"Progress: {completed} of {total_tasks} stocks processed...")
+                all_results.append({
+                    'Symbol': symbol,
+                    'Purchase Date': purchase_date.strftime("%Y-%m-%d"),
+                    'Investment Amount': investment_amount,
+                    'Current Value': round(current_value, 2),
+                    'Percent Change': round(percent_change, 2)
+                })
 
-    if results:
-        df = pd.DataFrame(results)
+            except Exception as e:
+                all_failures.append({
+                    'Symbol': symbol,
+                    'Date': purchase_date,
+                    'Error': str(e)
+                })
+
+            count += 1
+            if count % 25 == 0 or count == total:
+                print(f"Progress: {count}/{total} symbol-lot comparisons completed...")
+
+            # Sleep to avoid DNS overload or rate-limits
+            time.sleep(1.0)
+
+    if all_results:
+        df = pd.DataFrame(all_results)
         df.sort_values(by='Percent Change', ascending=False, inplace=True)
         filename = f"sp500_comparison_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
         df.to_csv(filename, index=False)
-        print(f"\n✅ S&P 500 performance comparison saved to '{filename}'")
+        print(f"\n✅ Accurate S&P 500 performance comparison saved to '{filename}'")
 
-    if failures:
-        fail_df = pd.DataFrame(failures)
-        fail_filename = f"sp500_failed_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    if all_failures:
+        fail_df = pd.DataFrame(all_failures)
+        fail_filename = f"sp500_failed_final_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
         fail_df.to_csv(fail_filename, index=False)
-        print(f"⚠️  Failed downloads logged to '{fail_filename}'")
+        print(f"⚠️  Remaining failed comparisons saved to '{fail_filename}'")
+
 
 def main():
     results = []
