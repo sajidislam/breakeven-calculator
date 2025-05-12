@@ -3,30 +3,42 @@ import csv
 import os
 from datetime import datetime
 
-def parse_simple_input(content):
+def clean_trade_date(date_str):
+    """Handles formats like '04/21/2025 as of 04/17/2025' -> '04/21/2025'"""
+    return date_str.split()[0]
+
+def parse_multiple_trades(content):
     lines = [line.strip() for line in content.strip().split('\n') if line.strip()]
-    data = {}
+    trades = []
 
-    # First line: Date and Action
-    first_line_parts = lines[0].split()
-    data['Trade date'] = first_line_parts[0]
-    data['Action'] = first_line_parts[1]
+    i = 0
+    while i < len(lines):
+        if "Buy" in lines[i] or "Sell" in lines[i]:
+            trade = {}
 
-    # Third line: Symbol
-    data['Symbol'] = lines[2]
+            # Trade date & action
+            date_action = lines[i].split()
+            trade['Trade date'] = clean_trade_date(date_action[0])
+            trade['Action'] = date_action[1]
+            i += 2  # Skip "Trade Details"
 
-    # Fifth line: Quantity
-    data['Quantity'] = int(lines[4])
+            # Symbol
+            trade['Symbol'] = lines[i].strip()
+            i += 2  # Skip company name
 
-    # Sixth line: Price and Total
-    price_total_parts = lines[5].split()
-    data['Price'] = float(price_total_parts[0].replace('$', '').replace(',', ''))
-    data['Total'] = float(price_total_parts[-1].replace('$', '').replace(',', ''))
+            # Quantity
+            trade['Quantity'] = int(lines[i])
+            i += 1
 
-    # Commission is not listed, so assume 0
-    data['Commission'] = 0.00
+            # Price & Total
+            price_total_parts = lines[i].split()
+            trade['Price'] = float(price_total_parts[0].replace('$', '').replace(',', ''))
+            trade['Total'] = float(price_total_parts[-1].replace('$', '').replace(',', ''))
+            trade['Commission'] = 0.00  # Not shown, assume 0
 
-    return data
+            trades.append(trade)
+        i += 1
+    return trades
 
 def calculate_interest(principal, trade_date_str, rate=0.05):
     trade_date = datetime.strptime(trade_date_str, '%m/%d/%Y')
@@ -62,34 +74,25 @@ def main():
         print("You must provide either -i or -c.")
         return
 
-    data = parse_simple_input(content)
+    trades = parse_multiple_trades(content)
 
-    # Write to CSV
     filename = "trades.csv"
     file_exists = os.path.isfile(filename)
     with open(filename, 'a', newline='') as csvfile:
         fieldnames = ['Trade date', 'Symbol', 'Action', 'Quantity', 'Price', 'Total', 'Commission']
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-
         if not file_exists:
             writer.writeheader()
 
-        writer.writerow({
-            'Trade date': data['Trade date'],
-            'Symbol': data['Symbol'],
-            'Action': data['Action'],
-            'Quantity': data['Quantity'],
-            'Price': data['Price'],
-            'Total': data['Total'],
-            'Commission': data['Commission']
-        })
+        for trade in trades:
+            writer.writerow(trade)
 
-    # Interest & Breakeven
-    interest = calculate_interest(abs(data['Total']), data['Trade date'])
-    breakeven_price = calculate_breakeven(data['Total'], interest, data['Quantity'])
+            interest = calculate_interest(abs(trade['Total']), trade['Trade date'])
+            breakeven_price = calculate_breakeven(trade['Total'], interest, trade['Quantity'])
 
-    print(f"\nInterest accrued at 5% APR since {data['Trade date']}: ${interest:.2f}")
-    print(f"Breakeven sell price per share: ${breakeven_price:.2f}")
+            print(f"\nTrade: {trade['Symbol']} on {trade['Trade date']}")
+            print(f"  Interest accrued @5% APR: ${interest:.2f}")
+            print(f"  Breakeven sell price: ${breakeven_price:.2f}")
 
 if __name__ == "__main__":
     main()
