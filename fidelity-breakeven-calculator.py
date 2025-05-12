@@ -48,8 +48,7 @@ def parse_line(line):
     return purchase_date, quantity, cost_basis_total
 
 def compare_against_benchmark(trades):
-    #symbols_input = input("Enter one or more benchmark symbols (comma-separated), or press Enter to use SPY: ")
-    #symbols = [s.strip().upper() for s in symbols_input.split(',') if s.strip()] or ['SPY']
+
     symbols_input = input("Enter one or more benchmark symbols (comma-separated). SPY will always be included: ")
     user_symbols = [s.strip().upper() for s in symbols_input.split(',') if s.strip()]
     symbols = ['SPY'] + [s for s in user_symbols if s != 'SPY']
@@ -90,7 +89,7 @@ def compare_against_benchmark(trades):
     benchmark_df = pd.DataFrame(results)
     print("\nBenchmark Comparison:\n")
     print(benchmark_df.to_string(index=False))
-    return benchmark_df
+    return benchmark_df, symbols
 
 def main():
     results = []
@@ -148,7 +147,8 @@ def main():
 
     # Run benchmark comparison
     #compare_against_benchmark(benchmark_trades)
-    benchmark_df = compare_against_benchmark(benchmark_trades)
+    #benchmark_df = compare_against_benchmark(benchmark_trades)
+    benchmark_df, benchmark_symbols = compare_against_benchmark(benchmark_trades)
 
     # Combine both trade data and benchmark data
     trade_df = pd.DataFrame(results)
@@ -156,8 +156,14 @@ def main():
     print(trade_df.to_string(index=False))
 
     if not benchmark_df.empty:
-        print("\nBenchmark Comparison:\n")
+        #print("\nBenchmark Comparison:\n")
+        print("\nBenchmark Comparison (vs: " + ", ".join(benchmark_symbols) + "):\n")
         print(benchmark_df.to_string(index=False))
+
+        # Add symbols row above the benchmark data
+        symbols_header = pd.DataFrame([{
+            'Symbol': f"Benchmarks used: {', '.join(benchmark_symbols)}"
+        }])
 
         # Add an empty row and then the benchmark section to CSV
         empty_row = pd.Series(dtype=object)
