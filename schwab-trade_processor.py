@@ -102,20 +102,22 @@ def main():
         total_quantity = sum(t['Quantity'] for t in lots)
         total_cost = sum(abs(t['Total']) for t in lots)
         total_interest = sum(calculate_interest(abs(t['Total']), t['Trade date']) for t in lots)
-        lowest_price = min(t['Price'] for t in lots)
+        #**# Change: use highest price, not lowest**
+        highest_price = max(t['Price'] for t in lots)
 
         breakeven = round((total_cost + total_interest) / total_quantity, 2)
 
-        # Ensure breakeven is not below any lot's price
-        if breakeven < lowest_price:
-            breakeven = lowest_price
+        # Enforce wash-sale rule: must sell no lower than the highest purchase price
+        if breakeven < highest_price:
+            breakeven = highest_price
 
         print(f"\nSymbol: {symbol}")
         print(f"  Total Quantity: {total_quantity}")
         print(f"  Total Cost: ${total_cost:.2f}")
         print(f"  Total Interest @5%: ${total_interest:.2f}")
-        print(f"  Minimum Allowed Sell Price (no wash-sale risk): ${lowest_price:.2f}")
+        print(f"  Minimum Allowed Sell Price (no wash-sale risk): ${highest_price:.2f}")
         print(f"  ✅ Final Breakeven Price: ${breakeven:.2f}")
 
 if __name__ == "__main__":
     main()
+
