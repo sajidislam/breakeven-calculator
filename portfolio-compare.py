@@ -1,6 +1,6 @@
 import pandas as pd
 import yfinance as yf
-from datetime import datetime
+from datetime import datetime, date
 
 def get_year_end_price(symbol, year):
     """Get the adjusted close price of a symbol on the last trading day of a given year."""
@@ -21,6 +21,7 @@ def calculate_investment_performance(input_csv_path, output_csv_path):
 
     results = []
     yearly_growth = []
+    current_year = datetime.today().year
 
     for _, row in df_input.iterrows():
         symbol = row['Symbol']
@@ -31,7 +32,8 @@ def calculate_investment_performance(input_csv_path, output_csv_path):
         investment_year = investment_date.year
 
         try:
-            historical_data = yf.download(symbol, start=investment_date.strftime('%Y-%m-%d'), progress=False, auto_adjust=False)
+            historical_data = yf.download(symbol, start=investment_date.strftime('%Y-%m-%d'),
+                                          progress=False, auto_adjust=False)
             start_price = historical_data['Adj Close'].dropna().iloc[0].item()
             shares_bought = amount_invested / start_price
 
@@ -55,21 +57,22 @@ def calculate_investment_performance(input_csv_path, output_csv_path):
                 '% Growth': round(percent_growth, 2)
             })
 
-            current_year = datetime.today().year
+            # Only fetch year-end price if the year has finished.
             for year in range(investment_year, current_year + 1):
-                year_end_price, price_date = get_year_end_price(symbol, year)
-                if year_end_price is None:
-                    continue
-                value = shares_bought * year_end_price
-                growth = ((value - amount_invested) / amount_invested) * 100
-                yearly_growth.append({
-                    'Year': year,
-                    'Symbol': symbol,
-                    'Valuation Date': price_date,
-                    'Year-End Price': round(year_end_price, 2),
-                    'Value at Year-End': round(value, 2),
-                    '% Growth': round(growth, 2)
-                })
+                if year < current_year or (year == current_year and date.today().month == 12 and date.today().day == 31):
+                    year_end_price, price_date = get_year_end_price(symbol, year)
+                    if year_end_price is None:
+                        continue
+                    value = shares_bought * year_end_price
+                    growth = ((value - amount_invested) / amount_invested) * 100
+                    yearly_growth.append({
+                        'Year': year,
+                        'Symbol': symbol,
+                        'Valuation Date': price_date,
+                        'Year-End Price': round(year_end_price, 2),
+                        'Value at Year-End': round(value, 2),
+                        '% Growth': round(growth, 2)
+                    })
 
         except Exception as e:
             print(f"Error processing {symbol}: {e}")
