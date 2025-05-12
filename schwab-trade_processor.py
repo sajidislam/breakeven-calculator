@@ -2,9 +2,9 @@ import argparse
 import csv
 import os
 from datetime import datetime
+from collections import defaultdict
 
 def clean_trade_date(date_str):
-    """Handles formats like '04/21/2025 as of 04/17/2025' -> '04/21/2025'"""
     return date_str.split()[0]
 
 def parse_multiple_trades(content):
@@ -16,25 +16,21 @@ def parse_multiple_trades(content):
         if "Buy" in lines[i] or "Sell" in lines[i]:
             trade = {}
 
-            # Trade date & action
             date_action = lines[i].split()
             trade['Trade date'] = clean_trade_date(date_action[0])
             trade['Action'] = date_action[1]
-            i += 2  # Skip "Trade Details"
+            i += 2
 
-            # Symbol
             trade['Symbol'] = lines[i].strip()
-            i += 2  # Skip company name
+            i += 2
 
-            # Quantity
             trade['Quantity'] = int(lines[i])
             i += 1
 
-            # Price & Total
             price_total_parts = lines[i].split()
             trade['Price'] = float(price_total_parts[0].replace('$', '').replace(',', ''))
             trade['Total'] = float(price_total_parts[-1].replace('$', '').replace(',', ''))
-            trade['Commission'] = 0.00  # Not shown, assume 0
+            trade['Commission'] = 0.00
 
             trades.append(trade)
         i += 1
@@ -76,6 +72,7 @@ def main():
 
     trades = parse_multiple_trades(content)
 
+    # CSV Write
     filename = "trades.csv"
     file_exists = os.path.isfile(filename)
     with open(filename, 'a', newline='') as csvfile:
@@ -93,6 +90,32 @@ def main():
             print(f"\nTrade: {trade['Symbol']} on {trade['Trade date']}")
             print(f"  Interest accrued @5% APR: ${interest:.2f}")
             print(f"  Breakeven sell price: ${breakeven_price:.2f}")
+
+    # Group and summarize by symbol
+    grouped = defaultdict(list)
+    for trade in trades:
+        grouped[trade['Symbol']].append(trade)
+
+    print("\n📊 Symbol Summary with Wash-Sale Safe Breakeven:")
+
+    for symbol, lots in grouped.items():
+        total_quantity = sum(t['Quantity'] for t in lots)
+        total_cost = sum(abs(t['Total']) for t in lots)
+        total_interest = sum(calculate_interest(abs(t['Total']), t['Trade date']) for t in lots)
+        lowest_price = min(t['Price'] for t in lots)
+
+        breakeven = round((total_cost + total_interest) / total_quantity, 2)
+
+        # Ensure breakeven is not below any lot's price
+        if breakeven < lowest_price:
+            breakeven = lowest_price
+
+        print(f"\nSymbol: {symbol}")
+        print(f"  Total Quantity: {total_quantity}")
+        print(f"  Total Cost: ${total_cost:.2f}")
+        print(f"  Total Interest @5%: ${total_interest:.2f}")
+        print(f"  Minimum Allowed Sell Price (no wash-sale risk): ${lowest_price:.2f}")
+        print(f"  ✅ Final Breakeven Price: ${breakeven:.2f}")
 
 if __name__ == "__main__":
     main()
