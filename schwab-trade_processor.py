@@ -101,22 +101,40 @@ def main():
     for symbol, lots in grouped.items():
         total_quantity = sum(t['Quantity'] for t in lots)
         total_cost = sum(abs(t['Total']) for t in lots)
-        total_interest = sum(calculate_interest(abs(t['Total']), t['Trade date']) for t in lots)
-        #**# Change: use highest price, not lowest**
+
+        lot_breakevens = []
+        lot_flags = []
+
+        for t in lots:
+            interest = calculate_interest(abs(t['Total']), t['Trade date'])
+            lot_breakeven = round((abs(t['Total']) + interest) / t['Quantity'], 2)
+            lot_breakevens.append(lot_breakeven)
+            lot_flags.append({
+                'date': t['Trade date'],
+                'price': t['Price'],
+                'quantity': t['Quantity'],
+                'breakeven': lot_breakeven,
+                'interest': interest
+            })
+
         highest_price = max(t['Price'] for t in lots)
-
-        breakeven = round((total_cost + total_interest) / total_quantity, 2)
-
-        # Enforce wash-sale rule: must sell no lower than the highest purchase price
-        if breakeven < highest_price:
-            breakeven = highest_price
+        final_breakeven = max(max(lot_breakevens), highest_price)
 
         print(f"\nSymbol: {symbol}")
         print(f"  Total Quantity: {total_quantity}")
         print(f"  Total Cost: ${total_cost:.2f}")
-        print(f"  Total Interest @5%: ${total_interest:.2f}")
-        print(f"  Minimum Allowed Sell Price (no wash-sale risk): ${highest_price:.2f}")
-        print(f"  ✅ Final Breakeven Price: ${breakeven:.2f}")
+        print(f"  Final Breakeven Price (includes 5% APR & avoids wash sale): ${final_breakeven:.2f}")
+        print(f"  Highest Lot Purchase Price (wash sale floor): ${highest_price:.2f}")
+        print(f"\n  📌 Lot Breakdown:")
+
+        for lot in lot_flags:
+            warning = ""
+            if lot['breakeven'] > final_breakeven:
+                warning = " ⚠️ UNDER breakeven!"
+            print(
+                f"    Lot {lot['quantity']} @ ${lot['price']} on {lot['date']} "
+                f"=> Breakeven: ${lot['breakeven']} (interest: ${lot['interest']:.2f}){warning}"
+            )
 
 if __name__ == "__main__":
     main()
