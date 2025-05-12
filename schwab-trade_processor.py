@@ -15,7 +15,6 @@ def parse_multiple_trades(content):
     while i < len(lines):
         if "Buy" in lines[i] or "Sell" in lines[i]:
             trade = {}
-
             date_action = lines[i].split()
             trade['Trade date'] = clean_trade_date(date_action[0])
             trade['Action'] = date_action[1]
@@ -46,6 +45,28 @@ def calculate_interest(principal, trade_date_str, rate=0.05):
 def calculate_breakeven(total, interest, quantity):
     return round((abs(total) + interest) / quantity, 2)
 
+def export_summary_csv(symbol, lot_flags, summary_data):
+    now = datetime.now().strftime("%Y%m%d-%H%M%S")
+    filename = f"{symbol}-{now}.csv"
+    with open(filename, 'w', newline='') as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow(["Section", "Trade Date", "Quantity", "Price", "Interest", "Breakeven", "Risk Note"])
+
+        # Summary row
+        writer.writerow([
+            "SUMMARY", "", summary_data['Total Qty'], summary_data['Highest Price'],
+            round(summary_data['Total Interest'], 2), summary_data['Final Breakeven'], ""
+        ])
+
+        # Lot-level rows
+        for lot in lot_flags:
+            writer.writerow([
+                "LOT BREAKDOWN", lot['date'], lot['quantity'], lot['price'],
+                round(lot['interest'], 2), lot['breakeven'], lot['risk']
+            ])
+
+    print(f"\n📁 Exported: {filename}")
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-i", help="Input file name", type=str)
@@ -72,7 +93,7 @@ def main():
 
     trades = parse_multiple_trades(content)
 
-    # CSV Write
+    # CSV append
     filename = "trades.csv"
     file_exists = os.path.isfile(filename)
     with open(filename, 'a', newline='') as csvfile:
@@ -81,22 +102,23 @@ def main():
         if not file_exists:
             writer.writeheader()
 
+        print("\nTrade Breakdown:")
+        print("Trade Date   Symbol   Qty   Price   Interest   Breakeven")
+        print("----------------------------------------------------------")
+
         for trade in trades:
             writer.writerow(trade)
-
             interest = calculate_interest(abs(trade['Total']), trade['Trade date'])
             breakeven_price = calculate_breakeven(trade['Total'], interest, trade['Quantity'])
-
-            print(f"\nTrade: {trade['Symbol']} on {trade['Trade date']}")
-            print(f"  Interest accrued @5% APR: ${interest:.2f}")
-            print(f"  Breakeven sell price: ${breakeven_price:.2f}")
+            print(f"{trade['Trade date']:11} {trade['Symbol']:7} {trade['Quantity']:5} "
+                  f"{trade['Price']:6.2f}   {interest:7.2f}     {breakeven_price:7.2f}")
 
     # Group and summarize by symbol
     grouped = defaultdict(list)
     for trade in trades:
         grouped[trade['Symbol']].append(trade)
 
-    print("\n📊 Symbol Summary with Wash-Sale Safe Breakeven:")
+    print("\nSymbol Summary:")
 
     for symbol, lots in grouped.items():
         total_quantity = sum(t['Quantity'] for t in lots)
@@ -104,38 +126,47 @@ def main():
 
         lot_breakevens = []
         lot_flags = []
+        highest_price = max(t['Price'] for t in lots)
+        total_interest = 0.0
 
         for t in lots:
             interest = calculate_interest(abs(t['Total']), t['Trade date'])
-            lot_breakeven = round((abs(t['Total']) + interest) / t['Quantity'], 2)
+            total_interest += interest
+            lot_breakeven = calculate_breakeven(t['Total'], interest, t['Quantity'])
             lot_breakevens.append(lot_breakeven)
+
+            risk = "⚠️" if lot_breakeven > max(highest_price, max(lot_breakevens)) else "-"
             lot_flags.append({
                 'date': t['Trade date'],
                 'price': t['Price'],
                 'quantity': t['Quantity'],
+                'interest': interest,
                 'breakeven': lot_breakeven,
-                'interest': interest
+                'risk': risk
             })
 
-        highest_price = max(t['Price'] for t in lots)
         final_breakeven = max(max(lot_breakevens), highest_price)
 
-        print(f"\nSymbol: {symbol}")
-        print(f"  Total Quantity: {total_quantity}")
-        print(f"  Total Cost: ${total_cost:.2f}")
-        print(f"  Final Breakeven Price (includes 5% APR & avoids wash sale): ${final_breakeven:.2f}")
-        print(f"  Highest Lot Purchase Price (wash sale floor): ${highest_price:.2f}")
-        print(f"\n  📌 Lot Breakdown:")
+        print("\n" + "-"*70)
+        print(f"Symbol: {symbol}")
+        print(f"{'Total Qty':<12}{'Total Cost':<14}{'Highest Buy':<14}"
+              f"{'Interest':<12}{'Breakeven':<12}")
+        print(f"{total_quantity:<12}{total_cost:<14.2f}{highest_price:<14.2f}"
+              f"{total_interest:<12.2f}{final_breakeven:<12.2f}")
 
+        print("\nLot Breakdown:")
+        print("Trade Date   Qty   Price   Interest   Breakeven   Risk")
+        print("-------------------------------------------------------------")
         for lot in lot_flags:
-            warning = ""
-            if lot['breakeven'] > final_breakeven:
-                warning = " ⚠️ UNDER breakeven!"
-            print(
-                f"    Lot {lot['quantity']} @ ${lot['price']} on {lot['date']} "
-                f"=> Breakeven: ${lot['breakeven']} (interest: ${lot['interest']:.2f}){warning}"
-            )
+            print(f"{lot['date']:11} {lot['quantity']:5} {lot['price']:7.2f}   "
+                  f"{lot['interest']:7.2f}     {lot['breakeven']:7.2f}   {lot['risk']}")
+
+        export_summary_csv(symbol, lot_flags, {
+            'Total Qty': total_quantity,
+            'Highest Price': highest_price,
+            'Total Interest': total_interest,
+            'Final Breakeven': final_breakeven
+        })
 
 if __name__ == "__main__":
     main()
-
