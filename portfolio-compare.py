@@ -2,6 +2,7 @@ import pandas as pd
 import yfinance as yf
 from datetime import datetime, timedelta
 from tqdm import tqdm
+import time
 
 def get_last_trading_day_before(target_date):
     while True:
@@ -14,20 +15,35 @@ def get_last_trading_day_before(target_date):
             return data.index[-1].strftime('%Y-%m-%d')
         target_date -= timedelta(days=1)
 
-def get_price_on_or_before(symbol, target_date_str):
+def get_price_on_or_before(symbol, target_date_str, cached_data=None):
     target_date = datetime.strptime(target_date_str, '%Y-%m-%d')
-    start_date = target_date - timedelta(days=30)
-    data = yf.download(symbol,
-                       start=start_date.strftime('%Y-%m-%d'),
-                       end=(target_date + timedelta(days=1)).strftime('%Y-%m-%d'),
-                       progress=False,
-                       auto_adjust=False)
-    if data.empty or 'Adj Close' not in data.columns:
+
+    if cached_data is not None:
+        try:
+            data = cached_data['Adj Close'].dropna()
+            filtered = data[data.index <= pd.to_datetime(target_date_str)]
+            if not filtered.empty:
+                return filtered.iloc[-1].item()
+        except Exception:
+            return None
         return None
-    adj_close = data['Adj Close'].dropna()
-    if adj_close.empty:
+
+    # fallback to on-demand download
+    try:
+        start_date = target_date - timedelta(days=30)
+        data = yf.download(symbol,
+                           start=start_date.strftime('%Y-%m-%d'),
+                           end=(target_date + timedelta(days=1)).strftime('%Y-%m-%d'),
+                           progress=False,
+                           auto_adjust=False)
+        if data.empty or 'Adj Close' not in data.columns:
+            return None
+        adj_close = data['Adj Close'].dropna()
+        if adj_close.empty:
+            return None
+        return adj_close.iloc[-1].item()
+    except Exception:
         return None
-    return adj_close.iloc[-1].item()  # get raw float
 
 def format_currency(amount):
     return f"${amount:,.2f}"
@@ -67,7 +83,16 @@ def calculate_investment_performance(input_csv_path):
     total_value = 0
     total_spy_value = 0
 
-    tqdm.pandas(desc="Processing investments")
+    # Cache SPY data once
+    try:
+        spy_data = yf.download("SPY",
+                               start=df_input['Date Invested'].min().strftime('%Y-%m-%d'),
+                               end=(datetime.strptime(end_date_str, "%Y-%m-%d") + timedelta(days=1)).strftime('%Y-%m-%d'),
+                               progress=False,
+                               auto_adjust=False)
+    except Exception as e:
+        print(f"❌ Failed to cache SPY data: {e}")
+        spy_data = None
 
     for _, row in tqdm(df_input.iterrows(), total=len(df_input), desc="Processing investments", leave=True):
         symbol = row['Symbol']
@@ -109,8 +134,8 @@ def calculate_investment_performance(input_csv_path):
 
         except Exception as e:
             print(f"Error processing {symbol}: {e}")
+        time.sleep(0.1)
 
-    # Benchmark simulation
     print("\n📈 Simulating SPY benchmark...")
     for _, row in tqdm(df_input.iterrows(), total=len(df_input), desc="Simulating SPY benchmark", leave=True):
         investment_date = row['Date Invested']
@@ -120,14 +145,15 @@ def calculate_investment_performance(input_csv_path):
         investment_date_str = investment_date.strftime('%Y-%m-%d')
 
         try:
-            spy_start_price = get_price_on_or_before("SPY", investment_date_str)
-            spy_end_price = get_price_on_or_before("SPY", end_date_str)
+            spy_start_price = get_price_on_or_before("SPY", investment_date_str, cached_data=spy_data)
+            spy_end_price = get_price_on_or_before("SPY", end_date_str, cached_data=spy_data)
             if spy_start_price is not None and spy_end_price is not None:
                 spy_shares = amount_invested / spy_start_price
                 spy_value = spy_shares * spy_end_price
                 total_spy_value += spy_value
         except Exception as e:
             print(f"Error processing SPY for {investment_date_str}: {e}")
+        time.sleep(0.1)
 
     df_main = pd.DataFrame(results)
 
@@ -174,13 +200,11 @@ def calculate_investment_performance(input_csv_path):
     df_summary = pd.DataFrame(summary_rows)
     df_combined = pd.concat([df_main, df_summary], ignore_index=True)
 
-    # Format output
     df_display = df_combined.copy()
     df_display['Initial Investment'] = df_display['Initial Investment'].apply(safe_format_currency)
     df_display['Current Value'] = df_display['Current Value'].apply(safe_format_currency)
     df_display['% Growth'] = df_display['% Growth'].apply(safe_format_percent)
 
-    # Save to CSV
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_csv = f"portfolio_performance_{timestamp}.csv"
     df_display.to_csv(output_csv, index=False)
