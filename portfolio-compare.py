@@ -1,9 +1,9 @@
 import pandas as pd
 import yfinance as yf
 from datetime import datetime, timedelta
+from tqdm import tqdm
 
 def get_last_trading_day_before(target_date):
-    """Get the last trading day before or on the given date."""
     while True:
         data = yf.download("SPY",
                            start=target_date.strftime('%Y-%m-%d'),
@@ -15,7 +15,6 @@ def get_last_trading_day_before(target_date):
         target_date -= timedelta(days=1)
 
 def get_price_on_or_before(symbol, target_date_str):
-    """Get the adjusted close price on or before a given date."""
     target_date = datetime.strptime(target_date_str, '%Y-%m-%d')
     start_date = target_date - timedelta(days=30)
     data = yf.download(symbol,
@@ -28,8 +27,7 @@ def get_price_on_or_before(symbol, target_date_str):
     adj_close = data['Adj Close'].dropna()
     if adj_close.empty:
         return None
-    return adj_close.iloc[-1].item()  # FIXED: extract scalar float value
-
+    return adj_close.iloc[-1].item()  # get raw float
 
 def format_currency(amount):
     return f"${amount:,.2f}"
@@ -42,14 +40,12 @@ def safe_format_currency(x):
         return ''
     return format_currency(x)
 
-
 def safe_format_percent(x):
     if pd.isna(x):
         return ''
     return format_percent(x)
 
 def calculate_investment_performance(input_csv_path):
-    # Ask user for end date
     user_input = input("Enter end date (YYYY-MM-DD), or press Enter to use the latest trading day: ").strip()
     if user_input:
         try:
@@ -71,7 +67,9 @@ def calculate_investment_performance(input_csv_path):
     total_value = 0
     total_spy_value = 0
 
-    for _, row in df_input.iterrows():
+    tqdm.pandas(desc="Processing investments")
+
+    for _, row in tqdm(df_input.iterrows(), total=len(df_input), desc="Processing investments", leave=True):
         symbol = row['Symbol']
         investment_date = row['Date Invested']
         if pd.isnull(investment_date):
@@ -109,19 +107,30 @@ def calculate_investment_performance(input_csv_path):
                 '% Growth': percent_growth
             })
 
+        except Exception as e:
+            print(f"Error processing {symbol}: {e}")
+
+    # Benchmark simulation
+    print("\n📈 Simulating SPY benchmark...")
+    for _, row in tqdm(df_input.iterrows(), total=len(df_input), desc="Simulating SPY benchmark", leave=True):
+        investment_date = row['Date Invested']
+        if pd.isnull(investment_date):
+            continue
+        amount_invested = float(row['Amount Invested'])
+        investment_date_str = investment_date.strftime('%Y-%m-%d')
+
+        try:
             spy_start_price = get_price_on_or_before("SPY", investment_date_str)
             spy_end_price = get_price_on_or_before("SPY", end_date_str)
             if spy_start_price is not None and spy_end_price is not None:
                 spy_shares = amount_invested / spy_start_price
                 spy_value = spy_shares * spy_end_price
                 total_spy_value += spy_value
-
         except Exception as e:
-            print(f"Error processing {symbol}: {e}")
+            print(f"Error processing SPY for {investment_date_str}: {e}")
 
     df_main = pd.DataFrame(results)
 
-    # Add summary rows
     total_growth = ((total_value - total_invested) / total_invested) * 100 if total_invested else 0
     spy_growth = ((total_spy_value - total_invested) / total_invested) * 100 if total_invested else 0
     vs_spy = total_growth - spy_growth
@@ -165,13 +174,13 @@ def calculate_investment_performance(input_csv_path):
     df_summary = pd.DataFrame(summary_rows)
     df_combined = pd.concat([df_main, df_summary], ignore_index=True)
 
-    # Apply safe formatting
+    # Format output
     df_display = df_combined.copy()
     df_display['Initial Investment'] = df_display['Initial Investment'].apply(safe_format_currency)
     df_display['Current Value'] = df_display['Current Value'].apply(safe_format_currency)
     df_display['% Growth'] = df_display['% Growth'].apply(safe_format_percent)
 
-    # Save to file
+    # Save to CSV
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_csv = f"portfolio_performance_{timestamp}.csv"
     df_display.to_csv(output_csv, index=False)
