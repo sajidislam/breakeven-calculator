@@ -115,33 +115,60 @@ def analyze_sp500(start_date, end_date, investment_amount):
     print(f"\n✅ Successfully fetched data for {len(results)} / {len(df_info)} symbols.")
     return pd.DataFrame(results)
 
-# === Run the analysis ===
-start_date = datetime.strptime("2024-02-29", "%Y-%m-%d")
-end_date = datetime.strptime("2025-05-07", "%Y-%m-%d")
-investment_amount = 1000.00
+# === Entry Point ===
+if __name__ == "__main__":
+    # Default values
+    default_start = "2024-02-29"
+    default_end = "2025-05-07"
+    default_amount = 1000.00
 
-df = analyze_sp500(start_date, end_date, investment_amount)
+    # Get start date
+    start_input = input(f"Enter start date (YYYY-MM-DD) [default: {default_start}]: ").strip()
+    if not start_input:
+        start_input = default_start
+    try:
+        start_date = datetime.strptime(start_input, "%Y-%m-%d")
+    except ValueError:
+        print("❌ Invalid start date format. Please use YYYY-MM-DD.")
+        exit(1)
 
-# Sort by best dividend reinvested growth
-df['Dividend Reinvested % Growth (Num)'] = df['Dividend Reinvested % Growth'].str.rstrip('%').astype(float)
-df = df.sort_values(by='Dividend Reinvested % Growth (Num)', ascending=False)
-df.drop(columns=['Dividend Reinvested % Growth (Num)'], inplace=True)
+    # Get end date
+    end_input = input(f"Enter end date (YYYY-MM-DD) [default: {default_end}]: ").strip()
+    if not end_input:
+        end_input = default_end
+    try:
+        end_date = datetime.strptime(end_input, "%Y-%m-%d")
+    except ValueError:
+        print("❌ Invalid end date format. Please use YYYY-MM-DD.")
+        exit(1)
 
-# Print top 10 and bottom 10
-print("\n🏆 Top 10 Performers:")
-print(df.head(10).to_string(index=False))
+    # Get investment amount
+    amount_input = input(f"Enter investment amount (default is ${default_amount:,.2f}): ").strip()
+    investment_amount = default_amount
+    if amount_input:
+        try:
+            investment_amount = clean_investment_amount(amount_input)
+        except ValueError:
+            print("❌ Invalid investment amount. Please enter a valid number.")
+            exit(1)
 
-print("\n📉 Bottom 10 Performers:")
-print(df.tail(10).to_string(index=False))
+    # Run analysis
+    df = analyze_sp500(start_date, end_date, investment_amount)
 
+    # Sort by dividend-reinvested growth
+    df['Dividend Reinvested % Growth (Num)'] = df['Dividend Reinvested % Growth'].str.rstrip('%').astype(float)
+    df = df.sort_values(by='Dividend Reinvested % Growth (Num)', ascending=False)
+    df.drop(columns=['Dividend Reinvested % Growth (Num)'], inplace=True)
 
-# Save results with timestamp
-timestamp = datetime.now().strftime("%Y-%m-%d_%H%M")
-file_name = f"sp500_growth_comparison_{timestamp}.csv"
-df.to_csv(file_name, index=False)
+    # Display top and bottom 10
+    print("\n🏆 Top 10 Performers:")
+    print(df.head(10).to_string(index=False))
 
-# Print all rows
-#with pd.option_context('display.max_rows', None, 'display.max_columns', None):
-#    print(f"\n📈 Saved results to: {file_name}")
-#    print(df)
+    print("\n📉 Bottom 10 Performers:")
+    print(df.tail(10).to_string(index=False))
 
+    # Save results with timestamp
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H%M")
+    file_name = f"sp500_growth_comparison_{timestamp}.csv"
+    df.to_csv(file_name, index=False)
+    print(f"\n📁 Results saved to: {file_name}")
