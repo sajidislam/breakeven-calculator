@@ -335,12 +335,16 @@ def main():
 
     total_adjusted_cost = sum(r['Interest-Adjusted Total Cost'] for r in results)
     total_quantity = sum(r['Quantity'] for r in results)
+
+    total_cost_basis = sum(r['Original Cost Basis'] for r in results if isinstance(r['Original Cost Basis'], (int, float)))
+
+    avg_cost_basis_per_share = round(total_cost_basis / total_quantity, 2)
     avg_sale_price_required = round(total_adjusted_cost / total_quantity, 4)
 
     results.append({
         'Purchase Date': '---',
         'Quantity': total_quantity,
-        'Original Cost Basis': '---',
+        'Original Cost Basis': avg_cost_basis_per_share,
         'Interest-Adjusted Total Cost': round(total_adjusted_cost, 2),
         'Breakeven Price': avg_sale_price_required
     })
