@@ -340,19 +340,32 @@ def main():
     total_adjusted_cost = sum(r['Interest-Adjusted Total Cost'] for r in results)
     total_quantity = sum(r['Quantity'] for r in results)
     total_cost_basis = sum(r['Original Cost Basis'] for r in results if isinstance(r['Original Cost Basis'], (int, float)))
+    total_interest_accrued = sum(r['Interest Accrued'] for r in results if isinstance(r['Interest Accrued'], (int, float)))
     avg_cost_basis_per_share = round(total_cost_basis / total_quantity, 2)
     avg_sale_price_required = round(total_adjusted_cost / total_quantity, 4)
+
+    # Add separator row
+    results.append({
+        'Purchase Date': '---****---',
+        'Quantity': '---****---',
+        'Original Cost Basis': '---****---',
+        'Holding Duration (days)': '---****---',
+        'Interest Accrued': '---****---',
+        'Interest-Adjusted Total Cost': '---****---',
+        'Breakeven Price': '---****---'
+    })
 
     results.append({
         'Purchase Date': '---',
         'Quantity': total_quantity,
         'Original Cost Basis': avg_cost_basis_per_share,
         'Holding Duration (days)': '---',
-        'Interest Accrued': '---',
+        'Interest Accrued': round(total_interest_accrued, 2),
         'Interest-Adjusted Total Cost': round(total_adjusted_cost, 2),
         'Breakeven Price': avg_sale_price_required
     })
-    
+
+
     spy_performance = get_spy_performance(benchmark_trades)
     for r in results:
         if r['Purchase Date'] != '---':
