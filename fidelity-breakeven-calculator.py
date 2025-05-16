@@ -476,7 +476,14 @@ def main():
 
     trade_df = pd.DataFrame(results)
 
-   # Compute and append future projection rows
+   
+    # Insert a row of **** for spacing
+    label_row = pd.Series({col: '=====' for col in trade_df.columns})
+    label_row['Purchase Date'] = '=== Projected Future Values ==='
+    trade_df = pd.concat([trade_df, pd.DataFrame([label_row])], ignore_index=True)
+
+
+    # Compute and append future projection rows
     future_df = project_future_values(results, future_disposal_date, main_symbol)
     trade_df = pd.concat([trade_df, future_df], ignore_index=True)
 
