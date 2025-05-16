@@ -287,6 +287,7 @@ def compare_sp500_performance(trades):
         print(f"⚠️  Remaining failed comparisons saved to '{fail_filename}'")
 
 
+
 def main():
     parser = argparse.ArgumentParser(description="Fidelity Breakeven Calculator")
     parser.add_argument('-i', '--input', help='Input file name (e.g., input.txt)')
@@ -327,7 +328,7 @@ def main():
                 'Quantity': quantity,
                 'Original Cost Basis': round(cost_basis_total, 2),
                 'Holding Duration (days)': days_held,
-                'Interest Accrued': interest_accrued,
+                'Interest Accrued': round(interest_accrued, 2),
                 'Interest-Adjusted Total Cost': round(adjusted_cost, 2),
                 'Breakeven Price': round(breakeven_price, 4)
             })
@@ -344,27 +345,27 @@ def main():
     avg_cost_basis_per_share = round(total_cost_basis / total_quantity, 2)
     avg_sale_price_required = round(total_adjusted_cost / total_quantity, 4)
 
-    # Add separator row
-    results.append({
-        'Purchase Date': '---****---',
-        'Quantity': '---****---',
-        'Original Cost Basis': '---****---',
-        'Holding Duration (days)': '---****---',
-        'Interest Accrued': '---****---',
-        'Interest-Adjusted Total Cost': '---****---',
-        'Breakeven Price': '---****---'
-    })
-
+    # Separator row
     results.append({
         'Purchase Date': '---',
-        'Quantity': total_quantity,
-        'Original Cost Basis': avg_cost_basis_per_share,
+        'Quantity': '---',
+        'Original Cost Basis': '---',
         'Holding Duration (days)': '---',
-        'Interest Accrued': round(total_interest_accrued, 2),
-        'Interest-Adjusted Total Cost': round(total_adjusted_cost, 2),
-        'Breakeven Price': avg_sale_price_required
+        'Interest Accrued': '---',
+        'Interest-Adjusted Total Cost': '---',
+        'Breakeven Price': '---'
     })
 
+    # Summary row with formatted values
+    results.append({
+        'Purchase Date': 'TOTAL',
+        'Quantity': total_quantity,
+        'Original Cost Basis': f"${avg_cost_basis_per_share:,.2f}",
+        'Holding Duration (days)': '---',
+        'Interest Accrued': f"${total_interest_accrued:,.2f}",
+        'Interest-Adjusted Total Cost': f"${total_adjusted_cost:,.2f}",
+        'Breakeven Price': f"${avg_sale_price_required:,.2f}"
+    })
 
     spy_performance = get_spy_performance(benchmark_trades)
     for r in results:
@@ -375,6 +376,22 @@ def main():
             r['Vs SPY (%)'] = '---'
 
     trade_df = pd.DataFrame(results)
+
+    # Format currency values for cleaner output
+    def format_currency(val):
+        return f"${val:,.2f}" if isinstance(val, (float, int)) else val
+
+    # Format price (now to 2 decimal places instead of 4)
+    def format_price(val):
+        return f"${val:,.2f}" if isinstance(val, (float, int)) else val
+
+    # Apply formatting
+    trade_df['Original Cost Basis'] = trade_df['Original Cost Basis'].apply(format_currency)
+    trade_df['Interest Accrued'] = trade_df['Interest Accrued'].apply(format_currency)
+    trade_df['Interest-Adjusted Total Cost'] = trade_df['Interest-Adjusted Total Cost'].apply(format_currency)
+    trade_df['Breakeven Price'] = trade_df['Breakeven Price'].apply(format_price)
+
+    # Print final output
     print("\nTrade Summary:\n")
     print(trade_df.to_string(index=False))
 
