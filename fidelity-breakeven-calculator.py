@@ -319,11 +319,15 @@ def main():
             purchase_date, quantity, cost_basis_total = parse_line(line)
             adjusted_cost = compute_interest_adjusted_cost(purchase_date, cost_basis_total)
             breakeven_price = adjusted_cost / quantity
+            days_held = (TODAY - purchase_date).days
+            interest_accrued = round(adjusted_cost - cost_basis_total, 2)
 
             results.append({
                 'Purchase Date': purchase_date.strftime("%Y-%m-%d"),
                 'Quantity': quantity,
                 'Original Cost Basis': round(cost_basis_total, 2),
+                'Holding Duration (days)': days_held,
+                'Interest Accrued': interest_accrued,
                 'Interest-Adjusted Total Cost': round(adjusted_cost, 2),
                 'Breakeven Price': round(breakeven_price, 4)
             })
@@ -335,9 +339,7 @@ def main():
 
     total_adjusted_cost = sum(r['Interest-Adjusted Total Cost'] for r in results)
     total_quantity = sum(r['Quantity'] for r in results)
-
     total_cost_basis = sum(r['Original Cost Basis'] for r in results if isinstance(r['Original Cost Basis'], (int, float)))
-
     avg_cost_basis_per_share = round(total_cost_basis / total_quantity, 2)
     avg_sale_price_required = round(total_adjusted_cost / total_quantity, 4)
 
@@ -345,10 +347,12 @@ def main():
         'Purchase Date': '---',
         'Quantity': total_quantity,
         'Original Cost Basis': avg_cost_basis_per_share,
+        'Holding Duration (days)': '---',
+        'Interest Accrued': '---',
         'Interest-Adjusted Total Cost': round(total_adjusted_cost, 2),
         'Breakeven Price': avg_sale_price_required
     })
-
+    
     spy_performance = get_spy_performance(benchmark_trades)
     for r in results:
         if r['Purchase Date'] != '---':
