@@ -7,6 +7,7 @@ import yfinance as yf
 import os
 import time
 import random
+import argparse
 
 # Constants
 SAVINGS_RATE = 0.05
@@ -287,10 +288,30 @@ def compare_sp500_performance(trades):
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Fidelity Breakeven Calculator")
+    parser.add_argument('-i', '--input', help='Input file name (e.g., input.txt)')
+    parser.add_argument('-s', '--symbol', help='Stock or ETF symbol to analyze (e.g., AAPL)')
+
+    args = parser.parse_args()
+    input_filename = args.input
+    main_symbol = args.symbol
+
+    # Prompt if missing
+    if not input_filename:
+        input_filename = input("Enter the name of the input file (e.g., input.txt): ").strip()
+    if not main_symbol:
+        main_symbol = input("Enter the stock/ETF symbol to analyze: ").strip().upper()
+    else:
+        main_symbol = main_symbol.strip().upper()
+
     results = []
     benchmark_trades = []
 
-    with open('input.txt', 'r') as f:
+    if not os.path.exists(input_filename):
+        print(f"❌ Error: File '{input_filename}' not found.")
+        return
+
+    with open(input_filename, 'r') as f:
         for line in f:
             if not line.strip() or line.lower().startswith('acquired'):
                 continue
