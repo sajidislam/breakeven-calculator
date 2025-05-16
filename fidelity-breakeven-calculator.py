@@ -286,14 +286,77 @@ def compare_sp500_performance(trades):
         fail_df.to_csv(fail_filename, index=False)
         print(f"⚠️  Remaining failed comparisons saved to '{fail_filename}'")
 
+def project_future_values(results, future_disposal_date, symbol):
+    """Compute future interest and adjusted cost for each lot and return rows."""
+    future_rows = []
+    total_future_interest = 0.0
+    total_future_adjusted_cost = 0.0
+    total_quantity = sum(r['Quantity'] for r in results if isinstance(r['Quantity'], (int, float)))
+    avg_cost_basis_per_share = None
+
+    for trade in results:
+        if trade['Purchase Date'] in ['---', 'TOTAL']:
+            continue
+
+        purchase_date = datetime.strptime(trade['Purchase Date'], "%Y-%m-%d")
+        cost_basis = float(trade['Original Cost Basis'])
+        quantity = trade['Quantity']
+
+        days_held_future = (future_disposal_date - purchase_date).days
+        future_interest = cost_basis * ((1 + SAVINGS_RATE / 365) ** days_held_future - 1)
+        future_adjusted_cost = cost_basis + future_interest
+
+        total_future_interest += future_interest
+        total_future_adjusted_cost += future_adjusted_cost
+
+        future_rows.append({
+            'Symbol': trade['Symbol'],
+            'Purchase Date': trade['Purchase Date'],
+            'Quantity': quantity,
+            'Original Cost Basis': cost_basis,
+            'Holding Duration (days)': f"{days_held_future} (future)",
+            'Interest Accrued': round(future_interest, 2),
+            'Interest-Adjusted Total Cost': round(future_adjusted_cost, 2),
+            'Breakeven Price': round(future_adjusted_cost / quantity, 4),
+            'Vs SPY (%)': 'N/A'
+        })
+
+    # Add TOTAL future row
+    if total_quantity > 0:
+        avg_cost_basis_per_share = round(sum(r['Original Cost Basis'] for r in results if isinstance(r['Original Cost Basis'], (int, float))) / total_quantity, 2)
+        future_rows.append({
+            'Symbol': '---',
+            'Purchase Date': '---',
+            'Quantity': '---',
+            'Original Cost Basis': '---',
+            'Holding Duration (days)': '---',
+            'Interest Accrued': '---',
+            'Interest-Adjusted Total Cost': '---',
+            'Breakeven Price': '---',
+            'Vs SPY (%)': '---'
+        })
+        future_rows.append({
+            'Symbol': symbol,
+            'Purchase Date': f"FUTURE ({future_disposal_date.strftime('%Y-%m-%d')})",
+            'Quantity': total_quantity,
+            'Original Cost Basis': f"${avg_cost_basis_per_share:,.2f}",
+            'Holding Duration (days)': '---',
+            'Interest Accrued': f"${total_future_interest:,.2f}",
+            'Interest-Adjusted Total Cost': f"${total_future_adjusted_cost:,.2f}",
+            'Breakeven Price': f"${(total_future_adjusted_cost / total_quantity):,.2f}",
+            'Vs SPY (%)': '---'
+        })
+
+    return pd.DataFrame(future_rows)
 
 
 def main():
     parser = argparse.ArgumentParser(description="Fidelity Breakeven Calculator")
     parser.add_argument('-i', '--input', help='Input file name (e.g., input.txt)')
     parser.add_argument('-s', '--symbol', help='Stock or ETF symbol to analyze (e.g., AAPL)')
-
+    parser.add_argument('-d', '--disposal', help='Future disposal date (e.g., 2025-12-31)')
     args = parser.parse_args()
+
     input_filename = args.input
     main_symbol = args.symbol
 
@@ -304,6 +367,24 @@ def main():
         main_symbol = input("Enter the stock/ETF symbol to analyze: ").strip().upper()
     else:
         main_symbol = main_symbol.strip().upper()
+
+    # Handle disposal date
+    if args.disposal:
+        try:
+            future_disposal_date = datetime.strptime(args.disposal, "%Y-%m-%d")
+        except ValueError:
+            print("❌ Invalid disposal date format. Please use YYYY-MM-DD.")
+            return
+    else:
+        user_input = input("Enter a future disposal date (YYYY-MM-DD) or press Enter to use end of this year: ").strip()
+        if user_input:
+            try:
+                future_disposal_date = datetime.strptime(user_input, "%Y-%m-%d")
+            except ValueError:
+                print("❌ Invalid date format. Please use YYYY-MM-DD.")
+                return
+        else:
+            future_disposal_date = datetime(TODAY.year, 12, 31)
 
     results = []
     benchmark_trades = []
@@ -346,7 +427,6 @@ def main():
     avg_cost_basis_per_share = round(total_cost_basis / total_quantity, 2)
     avg_sale_price_required = round(total_adjusted_cost / total_quantity, 4)
 
-    # Separator row
     results.append({
         'Symbol': '---',
         'Purchase Date': '---',
@@ -358,7 +438,6 @@ def main():
         'Breakeven Price': '---'
     })
 
-    # Summary row with formatted values
     results.append({
         'Symbol': main_symbol,
         'Purchase Date': 'TOTAL',
@@ -380,33 +459,34 @@ def main():
 
     trade_df = pd.DataFrame(results)
 
-    # Format currency values for cleaner output
-    def format_currency(val):
-        return f"${val:,.2f}" if isinstance(val, (float, int)) else val
+   # Compute and append future projection rows
+    future_df = project_future_values(results, future_disposal_date, main_symbol)
+    trade_df = pd.concat([trade_df, future_df], ignore_index=True)
 
-    # Format price (now to 2 decimal places instead of 4)
-    def format_price(val):
-        return f"${val:,.2f}" if isinstance(val, (float, int)) else val
-
-    # Apply formatting
-    trade_df['Original Cost Basis'] = trade_df['Original Cost Basis'].apply(format_currency)
-    trade_df['Interest Accrued'] = trade_df['Interest Accrued'].apply(format_currency)
-    trade_df['Interest-Adjusted Total Cost'] = trade_df['Interest-Adjusted Total Cost'].apply(format_currency)
-    trade_df['Breakeven Price'] = trade_df['Breakeven Price'].apply(format_price)
-
-    # Rename columns per user preferences
+    # Rename columns
     trade_df.rename(columns={
+        'Symbol': 'Symbol',
         'Quantity': 'QTY',
         'Original Cost Basis': 'Cost-Basis',
         'Holding Duration (days)': 'Days-Held',
         'Interest Accrued': 'Int-Earned',
-        'Interest-Adjusted Total Cost': '| Cost-Basis+INT',
-        'Breakeven Price': '|Min. Sell-Price',
+        'Interest-Adjusted Total Cost': 'Cost-Basis+INT',
+        'Breakeven Price': 'Min. Sell-Price',
         'Vs SPY (%)': 'SPY%'
     }, inplace=True)
 
+    # Format currency values
+    def format_currency(val):
+        return f"${val:,.2f}" if isinstance(val, (float, int)) else val
 
-    # Print final output
+    def format_price(val):
+        return f"${val:,.2f}" if isinstance(val, (float, int)) else val
+
+    trade_df['Cost-Basis'] = trade_df['Cost-Basis'].apply(format_currency)
+    trade_df['Int-Earned'] = trade_df['Int-Earned'].apply(format_currency)
+    trade_df['Cost-Basis+INT'] = trade_df['Cost-Basis+INT'].apply(format_currency)
+    trade_df['Min. Sell-Price'] = trade_df['Min. Sell-Price'].apply(format_price)
+
     print("\nTrade Summary:\n")
     print(trade_df.to_string(index=False))
 
@@ -432,6 +512,7 @@ def main():
     if run_sp500 == 'y':
         fetch_sp500_list()
         compare_sp500_performance(benchmark_trades)
+
 
 if __name__ == "__main__":
     main()
