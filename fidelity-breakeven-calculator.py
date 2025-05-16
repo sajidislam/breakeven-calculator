@@ -324,6 +324,7 @@ def main():
             interest_accrued = round(adjusted_cost - cost_basis_total, 2)
 
             results.append({
+                'Symbol': main_symbol,
                 'Purchase Date': purchase_date.strftime("%Y-%m-%d"),
                 'Quantity': quantity,
                 'Original Cost Basis': round(cost_basis_total, 2),
@@ -347,6 +348,7 @@ def main():
 
     # Separator row
     results.append({
+        'Symbol': '---',
         'Purchase Date': '---',
         'Quantity': '---',
         'Original Cost Basis': '---',
@@ -358,6 +360,7 @@ def main():
 
     # Summary row with formatted values
     results.append({
+        'Symbol': main_symbol,
         'Purchase Date': 'TOTAL',
         'Quantity': total_quantity,
         'Original Cost Basis': f"${avg_cost_basis_per_share:,.2f}",
@@ -390,6 +393,18 @@ def main():
     trade_df['Interest Accrued'] = trade_df['Interest Accrued'].apply(format_currency)
     trade_df['Interest-Adjusted Total Cost'] = trade_df['Interest-Adjusted Total Cost'].apply(format_currency)
     trade_df['Breakeven Price'] = trade_df['Breakeven Price'].apply(format_price)
+
+    # Rename columns per user preferences
+    trade_df.rename(columns={
+        'Quantity': 'QTY',
+        'Original Cost Basis': 'Cost-Basis',
+        'Holding Duration (days)': 'Days-Held',
+        'Interest Accrued': 'Int-Earned',
+        'Interest-Adjusted Total Cost': '| Cost-Basis+INT',
+        'Breakeven Price': '|Min. Sell-Price',
+        'Vs SPY (%)': 'SPY%'
+    }, inplace=True)
+
 
     # Print final output
     print("\nTrade Summary:\n")
