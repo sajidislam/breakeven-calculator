@@ -286,20 +286,37 @@ def compare_sp500_performance(trades):
         fail_df.to_csv(fail_filename, index=False)
         print(f"⚠️  Remaining failed comparisons saved to '{fail_filename}'")
 
+def parse_cost_basis(val):
+    if isinstance(val, (int, float)):
+        return val
+    return float(str(val).replace('$', '').replace(',', ''))
+
 def project_future_values(results, future_disposal_date, symbol):
     """Compute future interest and adjusted cost for each lot and return rows."""
     future_rows = []
+
+    # ✅ Filter valid trade rows (exclude TOTAL or separator rows)
+
+    trade_lots = [
+        r for r in results
+        if isinstance(r.get('Quantity'), (int, float))
+        and isinstance(r.get('Purchase Date'), str)
+        and r['Purchase Date'] not in ['TOTAL', '---']
+    ]
+    total_quantity = sum(r['Quantity'] for r in trade_lots)
+
+    total_cost_basis = sum(parse_cost_basis(r['Original Cost Basis']) for r in trade_lots)
+    avg_cost_basis_per_share = round(total_cost_basis / total_quantity, 2)
+
     total_future_interest = 0.0
     total_future_adjusted_cost = 0.0
-    total_quantity = sum(r['Quantity'] for r in results if isinstance(r['Quantity'], (int, float)))
-    avg_cost_basis_per_share = None
 
-    for trade in results:
-        if trade['Purchase Date'] in ['---', 'TOTAL']:
-            continue
-
+    for trade in trade_lots:
         purchase_date = datetime.strptime(trade['Purchase Date'], "%Y-%m-%d")
-        cost_basis = float(trade['Original Cost Basis'])
+        
+        cost_basis = parse_cost_basis(trade['Original Cost Basis'])
+
+
         quantity = trade['Quantity']
 
         days_held_future = (future_disposal_date - purchase_date).days
@@ -321,31 +338,31 @@ def project_future_values(results, future_disposal_date, symbol):
             'Vs SPY (%)': 'N/A'
         })
 
-    # Add TOTAL future row
-    if total_quantity > 0:
-        avg_cost_basis_per_share = round(sum(r['Original Cost Basis'] for r in results if isinstance(r['Original Cost Basis'], (int, float))) / total_quantity, 2)
-        future_rows.append({
-            'Symbol': '---',
-            'Purchase Date': '---',
-            'Quantity': '---',
-            'Original Cost Basis': '---',
-            'Holding Duration (days)': '---',
-            'Interest Accrued': '---',
-            'Interest-Adjusted Total Cost': '---',
-            'Breakeven Price': '---',
-            'Vs SPY (%)': '---'
-        })
-        future_rows.append({
-            'Symbol': symbol,
-            'Purchase Date': f"FUTURE ({future_disposal_date.strftime('%Y-%m-%d')})",
-            'Quantity': total_quantity,
-            'Original Cost Basis': f"${avg_cost_basis_per_share:,.2f}",
-            'Holding Duration (days)': '---',
-            'Interest Accrued': f"${total_future_interest:,.2f}",
-            'Interest-Adjusted Total Cost': f"${total_future_adjusted_cost:,.2f}",
-            'Breakeven Price': f"${(total_future_adjusted_cost / total_quantity):,.2f}",
-            'Vs SPY (%)': '---'
-        })
+    # Add separator
+    future_rows.append({
+        'Symbol': '---',
+        'Purchase Date': '---',
+        'Quantity': '---',
+        'Original Cost Basis': '---',
+        'Holding Duration (days)': '---',
+        'Interest Accrued': '---',
+        'Interest-Adjusted Total Cost': '---',
+        'Breakeven Price': '---',
+        'Vs SPY (%)': '---'
+    })
+
+    # Add FUTURE TOTAL row
+    future_rows.append({
+        'Symbol': symbol,
+        'Purchase Date': f"FUTURE ({future_disposal_date.strftime('%Y-%m-%d')})",
+        'Quantity': total_quantity,
+        'Original Cost Basis': f"${avg_cost_basis_per_share:,.2f}",
+        'Holding Duration (days)': '---',
+        'Interest Accrued': f"${total_future_interest:,.2f}",
+        'Interest-Adjusted Total Cost': f"${total_future_adjusted_cost:,.2f}",
+        'Breakeven Price': f"${(total_future_adjusted_cost / total_quantity):,.2f}",
+        'Vs SPY (%)': '---'
+    })
 
     return pd.DataFrame(future_rows)
 
